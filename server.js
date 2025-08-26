@@ -65,29 +65,41 @@ app.post("/stop", async (req, res) => {
       return res.status(400).json({ ok: false, error: "MISSING_ID" });
     }
 
-    // normalize id: string or {$oid: "..."} or any object with an id-ish field
-    const idStr =
-      typeof raw === "string"
-        ? raw
-        : (raw && (raw.$oid || raw.oid || raw.id)) || String(raw);
+    // Normalize id and trim
+    const idStr = (typeof raw === "string"
+      ? raw
+      : (raw && (raw.$oid || raw.oid || raw.id)) || String(raw)
+    ).trim();
 
     const endedAt = new Date();
-    const r = await sessions.findOneAndUpdate(
-      { _id: new ObjectId(idStr) },
-      { $set: { endedAt } },
-      { returnDocument: "after" }
-    );
 
-    if (!r?.value) {
-      console.warn("STOP not found", { idStr });
+    // 1) Try ObjectId match
+    let result = null;
+    try {
+      result = await sessions.findOneAndUpdate(
+        { _id: new (require("mongodb").ObjectId)(idStr) },
+        { $set: { endedAt } },
+        { returnDocument: "after" }
+      );
+    } catch { /* ignore parse error, will try string */ }
+
+    // 2) If not found, try string _id (in case the doc was created with a string id)
+    if (!result?.value) {
+      result = await sessions.findOneAndUpdate(
+        { _id: idStr },
+        { $set: { endedAt } },
+        { returnDocument: "after" }
+      );
+    }
+
+    if (!result?.value) {
+      console.warn("STOP not found after both attempts", { idStr });
       return res.status(404).json({ ok: false, error: "NOT_FOUND" });
     }
 
-    const doc = r.value;
+    const doc = result.value;
     const duration =
-      doc.startedAt && doc.endedAt
-        ? (doc.endedAt - doc.startedAt) / 60000
-        : null;
+      doc.startedAt && doc.endedAt ? (doc.endedAt - doc.startedAt) / 60000 : null;
 
     console.log("STOP ok", { idStr, duration });
     res.json({ ok: true, id: idStr, endedAt, duration });
