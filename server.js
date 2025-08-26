@@ -56,6 +56,7 @@ app.post("/start", async (req, res) => {
 });
 
 // STOP by id — tries multiple match strategies
+// STOP: update by id (no endedAt filter), then by sid, then latest
 app.post("/stop", async (req, res) => {
   try {
     const raw = req.body?.id;
@@ -65,62 +66,72 @@ app.post("/stop", async (req, res) => {
     ).trim();
 
     const endedAt = new Date();
-    let result = null;
+    let r, doc;
 
-    // 1) _id: ObjectId
+    // 1) Try _id as ObjectId (no endedAt filter)
     if (idStr) {
       try {
-        result = await sessions.findOneAndUpdate(
-          { _id: new ObjectId(idStr), endedAt: null },
+        r = await sessions.findOneAndUpdate(
+          { _id: new (require("mongodb").ObjectId)(idStr) },
           { $set: { endedAt } },
           { returnDocument: "after" }
         );
-        if (result?.value) {
-          const d = result.value;
-          const duration = (d.endedAt - d.startedAt) / 60000;
+        if (r?.value) {
+          doc = r.value;
+          const duration = (doc.endedAt - doc.startedAt) / 60000;
           console.log("STOP ok via _id:ObjectId", { id: idStr, duration });
-          return res.json({ ok: true, id: String(d._id), endedAt, duration });
+          return res.json({ ok: true, id: String(doc._id), endedAt, duration });
         }
-      } catch { /* parse error → try next */ }
-    }
+      } catch { /* if parse fails, fall through */ }
 
-    // 2) _id: string
-    if (idStr && !result?.value) {
-      result = await sessions.findOneAndUpdate(
-        { _id: idStr, endedAt: null },
+      // 2) Try _id as string
+      r = await sessions.findOneAndUpdate(
+        { _id: idStr },
         { $set: { endedAt } },
         { returnDocument: "after" }
       );
-      if (result?.value) {
-        const d = result.value;
-        const duration = (d.endedAt - d.startedAt) / 60000;
+      if (r?.value) {
+        doc = r.value;
+        const duration = (doc.endedAt - doc.startedAt) / 60000;
         console.log("STOP ok via _id:string", { id: idStr, duration });
-        return res.json({ ok: true, id: String(d._id), endedAt, duration });
+        return res.json({ ok: true, id: String(doc._id), endedAt, duration });
       }
-    }
 
-    // 3) sid field
-    if (idStr && !result?.value) {
-      result = await sessions.findOneAndUpdate(
-        { sid: idStr, endedAt: null },
+      // 3) Try sid (string copy we wrote on start)
+      r = await sessions.findOneAndUpdate(
+        { sid: idStr },
         { $set: { endedAt } },
         { returnDocument: "after" }
       );
-      if (result?.value) {
-        const d = result.value;
-        const duration = (d.endedAt - d.startedAt) / 60000;
+      if (r?.value) {
+        doc = r.value;
+        const duration = (doc.endedAt - doc.startedAt) / 60000;
         console.log("STOP ok via sid", { id: idStr, duration });
-        return res.json({ ok: true, id: String(d._id), endedAt, duration });
+        return res.json({ ok: true, id: String(doc._id), endedAt, duration });
       }
     }
 
-    console.warn("STOP not found after id/sid attempts", { idStr });
+    // 4) Fallback: latest doc that is still open OR even if missing the field
+    r = await sessions.findOneAndUpdate(
+      { $or: [ { endedAt: null }, { endedAt: { $exists: false } } ] },
+      { $set: { endedAt } },
+      { sort: { startedAt: -1 }, returnDocument: "after" }
+    );
+    if (r?.value) {
+      doc = r.value;
+      const duration = (doc.endedAt - doc.startedAt) / 60000;
+      console.warn("STOP ok via latest fallback", { id: String(doc._id), duration });
+      return res.json({ ok: true, id: String(doc._id), endedAt, duration });
+    }
+
+    console.warn("STOP not found after all attempts", { idStr });
     return res.status(404).json({ ok: false, error: "NOT_FOUND" });
   } catch (e) {
     console.error("STOP error", e);
-    res.status(500).json({ ok: false, error: "STOP_FAILED" });
+    return res.status(500).json({ ok: false, error: "STOP_FAILED" });
   }
 });
+
 
 // NEW: STOP the latest open session regardless of id
 app.post("/stop-latest", async (_req, res) => {
