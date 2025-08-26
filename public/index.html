@@ -188,42 +188,43 @@
     </div>
   </main>
 
-  <script>
-    const startBtn = document.getElementById('start');
-    const stopBtn  = document.getElementById('stop');
-    const subj     = document.getElementById('subject');
-    const statusEl = document.getElementById('status');
-    const elapsed  = document.getElementById('elapsed');
-    const chipsBox = document.getElementById('chips');
+<script>
+  const startBtn = document.getElementById('start');
+  const stopBtn  = document.getElementById('stop');
+  const subj     = document.getElementById('subject');
+  const statusEl = document.getElementById('status');
+  const elapsed  = document.getElementById('elapsed');
+  const chipsBox = document.getElementById('chips');
 
-    let t0=null, timer=null;
+  let t0 = null;
+  let timer = null;
+  let running = false;
+  let stopPending = false;
 
-    const pad = n => String(n).padStart(2,'0');
-    function fmt(ms){
-      const s = Math.floor(ms/1000);
-      const h = Math.floor(s/3600);
-      const m = Math.floor((s%3600)/60);
-      const sec = s%60;
-      return `${pad(h)}:${pad(m)}:${pad(sec)}`;
-    }
-    function setRun(running){
-      startBtn.disabled = running;
-      stopBtn.disabled  = !running;
-    }
-    async function post(path, body){
-      const res = await fetch(path, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(body||{})
-      });
-      if(!res.ok){
-        const text = await res.text().catch(()=> 'error');
-        throw new Error(text);
-      }
-      return res.json();
-    }
+  const pad = n => String(n).padStart(2,'0');
+  function fmt(ms){
+    const s = Math.floor(ms/1000);
+    const h = Math.floor(s/3600);
+    const m = Math.floor((s%3600)/60);
+    const sec = s%60;
+    return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+  }
+  function setRun(runningNow){
+    startBtn.disabled = runningNow || stopPending;
+    stopBtn.disabled  = !runningNow || stopPending;
+  }
+  async function post(path, body){
+    const res = await fetch(path, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body||{})
+    });
+    if(!res.ok) throw new Error(await res.text().catch(()=> 'Request failed'));
+    return res.json();
+  }
 
-    // Chip clicks set the subject & highlight
+  // Subject chips
+  if (chipsBox) {
     chipsBox.addEventListener('click', (e)=>{
       const btn = e.target.closest('.chip');
       if(!btn) return;
@@ -232,44 +233,70 @@
       subj.value = btn.dataset.subject || btn.textContent.trim();
       subj.focus();
     });
+  }
 
-    startBtn.onclick = async () => {
-      try{
-        statusEl.textContent = 'Starting…';
-        await post('/start', { subject: subj.value.trim() });
-        t0 = Date.now();
-        timer = setInterval(()=> elapsed.textContent = fmt(Date.now()-t0), 250);
-        setRun(true);
-        statusEl.textContent = 'Running';
-      }catch(err){
-        console.error(err);
-        statusEl.textContent = 'Start error';
-      }
-    };
+  startBtn.onclick = async () => {
+    if (running || stopPending) return;
+    try{
+      statusEl.textContent = 'Starting…';
+      // ensure no prior interval keeps ticking
+      if (timer) { clearInterval(timer); timer = null; }
+      t0 = Date.now();
+      running = true;
+      setRun(true);
+      timer = setInterval(()=> elapsed.textContent = fmt(Date.now()-t0), 250);
+      await post('/start', { subject: subj.value.trim() });
+      statusEl.textContent = 'Running';
+    }catch(err){
+      running = false;
+      if (timer) { clearInterval(timer); timer = null; }
+      setRun(false);
+      console.error(err);
+      statusEl.textContent = 'Start error';
+    }
+  };
 
-    stopBtn.onclick = async () => {
-      try{
-        statusEl.textContent = 'Stopping…';
-        const res = await post('/stop', {});
-        clearInterval(timer);
-        setRun(false);
-        statusEl.textContent = res?.duration != null
-          ? `Stopped • ${res.duration.toFixed(2)} min`
-          : 'Stopped';
-      }catch(err){
-        console.error(err);
-        statusEl.textContent = 'Stop error';
-      }
-    };
+  stopBtn.onclick = async () => {
+    if (!running || stopPending) return;
+    stopPending = true;
 
-    // Keyboard shortcuts
-    window.addEventListener('keydown', (e)=>{
-      if (e.key.toLowerCase() === 's' && !startBtn.disabled) {
-        e.preventDefault(); startBtn.click();
-      } else if (e.code === 'Space' && !stopBtn.disabled) {
-        e.preventDefault(); stopBtn.click();
+    // Freeze timer **immediately**
+    const stoppedAt = Date.now();
+    const ms = stoppedAt - t0;
+    if (timer) { clearInterval(timer); timer = null; }
+    running = false;
+    setRun(false);
+    elapsed.textContent = fmt(ms);
+    statusEl.textContent = 'Stopping…';
+
+    try{
+      const res = await post('/stop', {});
+      // optional: display server-computed duration (trust backend)
+      if (typeof res?.duration === 'number') {
+        elapsed.textContent = fmt(Math.round(res.duration * 60000));
       }
-    });
-  </script>
+      statusEl.textContent = res?.duration != null
+        ? `Stopped • ${res.duration.toFixed(2)} min`
+        : 'Stopped';
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = 'Stopped (offline)';
+      // we already froze the timer, keep it stopped
+    } finally {
+      stopPending = false;
+      setRun(false);
+    }
+  };
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e)=>{
+    if (e.key.toLowerCase() === 's' && !startBtn.disabled) {
+      e.preventDefault(); startBtn.click();
+    } else if (e.code === 'Space' && !stopBtn.disabled) {
+      e.preventDefault(); stopBtn.click();
+    }
+  });
+</script>
+
 </body>
 </html>
