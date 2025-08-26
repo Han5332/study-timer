@@ -60,31 +60,28 @@ app.post("/start", async (req, res) => {
 app.post("/stop", async (req, res) => {
   try {
     let raw = req.body?.id;
-    if (!raw) {
-      console.warn("STOP missing id", req.body);
-      return res.status(400).json({ ok: false, error: "MISSING_ID" });
-    }
-
-    // Normalize id and trim
+    // normalize & trim
     const idStr = (typeof raw === "string"
       ? raw
-      : (raw && (raw.$oid || raw.oid || raw.id)) || String(raw)
+      : (raw && (raw.$oid || raw.oid || raw.id)) || String(raw || "")
     ).trim();
 
     const endedAt = new Date();
-
-    // 1) Try ObjectId match
     let result = null;
-    try {
-      result = await sessions.findOneAndUpdate(
-        { _id: new (require("mongodb").ObjectId)(idStr) },
-        { $set: { endedAt } },
-        { returnDocument: "after" }
-      );
-    } catch { /* ignore parse error, will try string */ }
 
-    // 2) If not found, try string _id (in case the doc was created with a string id)
-    if (!result?.value) {
+    // 1) Try ObjectId(_id)
+    try {
+      if (idStr) {
+        result = await sessions.findOneAndUpdate(
+          { _id: new (require("mongodb").ObjectId)(idStr) },
+          { $set: { endedAt } },
+          { returnDocument: "after" }
+        );
+      }
+    } catch { /* ignore parse errors */ }
+
+    // 2) Try string _id
+    if (!result?.value && idStr) {
       result = await sessions.findOneAndUpdate(
         { _id: idStr },
         { $set: { endedAt } },
@@ -92,22 +89,38 @@ app.post("/stop", async (req, res) => {
       );
     }
 
+    // 3) Fallback: stop the most recent "open" session
     if (!result?.value) {
-      console.warn("STOP not found after both attempts", { idStr });
+      result = await sessions.findOneAndUpdate(
+        { endedAt: null },
+        { $set: { endedAt } },
+        { sort: { startedAt: -1 }, returnDocument: "after" }
+      );
+      if (result?.value) {
+        console.warn("STOP fallback used (ended latest open session)", {
+          fallbackId: String(result.value._id)
+        });
+      }
+    }
+
+    if (!result?.value) {
+      console.warn("STOP not found after all attempts", { idStr });
       return res.status(404).json({ ok: false, error: "NOT_FOUND" });
     }
 
     const doc = result.value;
-    const duration =
-      doc.startedAt && doc.endedAt ? (doc.endedAt - doc.startedAt) / 60000 : null;
+    const duration = (doc.startedAt && doc.endedAt)
+      ? (doc.endedAt - doc.startedAt) / 60000
+      : null;
 
-    console.log("STOP ok", { idStr, duration });
-    res.json({ ok: true, id: idStr, endedAt, duration });
+    console.log("STOP ok", { id: String(doc._id), duration });
+    res.json({ ok: true, id: String(doc._id), endedAt, duration });
   } catch (e) {
     console.error("STOP error", e);
     res.status(500).json({ ok: false, error: "STOP_FAILED" });
   }
 });
+
 
 // list
 app.get("/sessions", async (_req, res) => {
