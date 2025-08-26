@@ -53,24 +53,26 @@ app.post("/start", async (req, res) => {
 
 // Stop
 app.post("/stop", async (req, res) => {
-  const id = req.body?.id;
-  if (!id) return res.status(400).json({ ok: false, error: "Missing id" });
+  let raw = req.body?.id;
+  if (!raw) return res.status(400).json({ ok: false, error: "Missing id" });
+
+  // Accept "abc...", {"$oid":"abc..."}, or anything with toString()
+  const idStr =
+    typeof raw === "string" ? raw :
+    (raw && typeof raw === "object" && (raw.$oid || raw.oid || raw.id)) ||
+    String(raw);
+
   const endedAt = new Date();
   const r = await sessions.findOneAndUpdate(
-    { _id: new (require("mongodb").ObjectId)(id) },
+    { _id: new (require("mongodb").ObjectId)(idStr) },
     { $set: { endedAt } },
     { returnDocument: "after" }
   );
   if (!r.value) return res.status(404).json({ ok: false, error: "Not found" });
-  const doc = r.value;
-  const duration = doc.startedAt && doc.endedAt ? (doc.endedAt - doc.startedAt) / 60000 : null;
-  res.json({ ok: true, endedAt, duration });
-});
 
-// Sessions
-app.get("/sessions", async (_req, res) => {
-  const list = await sessions.find().sort({ startedAt: -1 }).limit(500).toArray();
-  res.json(list);
+  const doc = r.value;
+  const duration = (doc.startedAt && doc.endedAt) ? (doc.endedAt - doc.startedAt) / 60000 : null;
+  res.json({ ok: true, endedAt, duration });
 });
 
 app.listen(PORT, () => console.log("Timer running on", PORT));
