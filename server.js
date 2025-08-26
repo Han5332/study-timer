@@ -145,52 +145,48 @@ async function pushToNotion({ subject, startedAt, endedAt, minutes }) {
   const map = await mapNotionProps();
   if (!map || !map.title || (!map.rangeProp && !(map.startProp && map.endProp))) {
     throw new Error(
-      `Notion DB needs a Title and either (Start+End) date columns or one Date column. Found: ${JSON.stringify(
-        map?.all || []
-      )}`
+      `Notion DB needs a Title and either (Start+End) date columns or one Date column. Found: ${JSON.stringify(map?.all || [])}`
     );
   }
 
   const startISO = new Date(startedAt).toISOString();
-  const endISO = new Date(endedAt).toISOString();
+  const endISO   = new Date(endedAt).toISOString();
 
-  const pretty =
-    `${subject ? `Study: ${subject}` : "Study Session"} — ` +
-    `${fmtHMS(startedAt)} → ${fmtHMS(endedAt)} ` +
-    `(${Math.round(minutes * 100) / 100}m)`;
+  // Title = subject only; fall back to DEFAULT_SUBJECT or "Misc"
+  const DEFAULT_SUBJECT = process.env.DEFAULT_SUBJECT || "Misc";
+  const cleanSubject = (subject && String(subject).trim())
+    ? String(subject).trim()
+    : DEFAULT_SUBJECT;
 
   const properties = {
-    [map.title]: { title: [{ text: { content: pretty } }] },
+    [map.title]: { title: [{ text: { content: cleanSubject } }] }
   };
 
+  // Dates: prefer Start/End columns; otherwise write a range to the single Date column
   if (map.startProp && map.endProp) {
     properties[map.startProp] = { date: { start: startISO } };
-    properties[map.endProp] = { date: { start: endISO } };
+    properties[map.endProp]   = { date: { start: endISO   } };
   } else if (map.rangeProp) {
     properties[map.rangeProp] = { date: { start: startISO, end: endISO } };
   }
 
-  if (map.minutesProp)
-    properties[map.minutesProp] = {
-      number: Math.round(minutes * 100) / 100,
-    };
-  if (map.hoursProp)
-    properties[map.hoursProp] = {
-      number: Math.round((minutes / 60) * 1000) / 1000,
-    };
+  // Numbers (if your DB has them)
+  if (map.minutesProp) properties[map.minutesProp] = { number: Math.round(minutes * 100) / 100 };
+  if (map.hoursProp)   properties[map.hoursProp]   = { number: Math.round((minutes / 60) * 1000) / 1000 };
 
-  if (map.subjectProp && subject) {
-    properties[map.subjectProp] = {
-      rich_text: [{ text: { content: subject } }],
-    };
+  // Optional rich_text Subject column mirrors the title
+  if (map.subjectProp) {
+    properties[map.subjectProp] = { rich_text: [{ text: { content: cleanSubject } }] };
   }
 
   const page = await notion.pages.create({
     parent: { database_id: NOTION_DB },
-    properties,
+    properties
   });
-  return { pageId: page.id, mapped: map };
+  return { pageId: page.id, mapped: map, title: cleanSubject };
 }
+
+
 
 /* =========================
  * Health
