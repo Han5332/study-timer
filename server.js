@@ -153,7 +153,7 @@ async function pushToNotion({ subject, startedAt, endedAt, minutes }) {
   const endISO   = new Date(endedAt).toISOString();
 
   // Title = subject only; fall back to DEFAULT_SUBJECT or "Misc"
-  const DEFAULT_SUBJECT = process.env.DEFAULT_SUBJECT || "Misc";
+  const DEFAULT_SUBJECT = process.env.DEFAULT_SUBJECT || "misc.";
   const cleanSubject = (subject && String(subject).trim())
     ? String(subject).trim()
     : DEFAULT_SUBJECT;
