@@ -1,0 +1,17 @@
+{
+  "name": "notion-basic-timer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Start/Stop timer that logs to a Notion database.",
+  "main": "server.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongodb": "^6.18.0"
+  }
+}
