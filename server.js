@@ -139,6 +139,22 @@ app.post("/stop", async (req, res) => {
   }
 });
 
+// DEBUG: last 5 docs with shapes
+app.get("/debug/latest", async (_req, res) => {
+  const docs = await sessions
+    .find({}, { projection: { _id: 1, sid: 1, startedAt: 1, endedAt: 1 } })
+    .sort({ startedAt: -1 })
+    .limit(5)
+    .toArray();
+  res.json(docs.map(d => ({
+    _id: typeof d._id === 'object' && d._id ? (d._id.toString ? d._id.toString() : d._id) : d._id,
+    sid: d.sid || null,
+    startedAt: d.startedAt,
+    endedAt: d.endedAt
+  })));
+});
+
+
 // List
 app.get("/sessions", async (_req, res) => {
   try {
