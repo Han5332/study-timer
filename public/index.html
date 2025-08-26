@@ -10,7 +10,6 @@
     input{flex:1;padding:8px}
     button{padding:10px 16px;border:1px solid #aaa;border-radius:10px;cursor:pointer}
     .time{font-size:28px;font-variant-numeric:tabular-nums;margin:12px 0}
-    .muted{color:#666;font-size:12px}
   </style>
 </head>
 <body>
@@ -24,62 +23,42 @@
   </div>
   <div class="time" id="elapsed">00:00:00</div>
   <div id="status">Idle</div>
-  <div class="muted">Tip: if Stop fails, it will auto-close the latest running session.</div>
 
-  <script>
-    const startBtn=document.getElementById('start');
-    const stopBtn =document.getElementById('stop');
-    const subj    =document.getElementById('subject');
-    const statusEl=document.getElementById('status');
-    const elapsed =document.getElementById('elapsed');
+<script>
+const startBtn=document.getElementById('start');
+const stopBtn =document.getElementById('stop');
+const subj    =document.getElementById('subject');
+const statusEl=document.getElementById('status');
+const elapsed =document.getElementById('elapsed');
 
-    let id=null, t0=null, timer=null;
+let t0=null, timer=null;
 
-    function fmt(ms){
-      const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
-      const pad=n=>String(n).padStart(2,'0'); return `${pad(h)}:${pad(m)}:${pad(sec)}`;
-    }
-    function setRun(r){ startBtn.disabled=r; stopBtn.disabled=!r; }
-    async function post(path, body){
-      const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-      if(!r.ok) throw new Error(await r.text());
-      return r.json();
-    }
+function fmt(ms){const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  const pad=n=>String(n).padStart(2,'0'); return `${pad(h)}:${pad(m)}:${pad(sec)}`;}
+function setRun(r){ startBtn.disabled=r; stopBtn.disabled=!r; }
+async function post(path, body){
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  if(!r.ok) throw new Error(await r.text()); return r.json();
+}
 
-    startBtn.onclick=async()=>{
-      statusEl.textContent='Starting…';
-      const res=await post('/start',{subject:subj.value});
-      id = typeof res.id==='string' ? res.id : (res.id && (res.id.$oid||res.id.id||res.id.oid)) || '';
-      if(!id){ statusEl.textContent='Start error (no id)'; return; }
-      t0=Date.now();
-      timer=setInterval(()=> elapsed.textContent=fmt(Date.now()-t0), 250);
-      setRun(true);
-      statusEl.textContent='Running';
-    };
+startBtn.onclick=async()=>{
+  statusEl.textContent='Starting…';
+  await post('/start',{subject:subj.value});
+  t0=Date.now(); timer=setInterval(()=> elapsed.textContent=fmt(Date.now()-t0), 250);
+  setRun(true); statusEl.textContent='Running';
+};
 
-    stopBtn.onclick=async()=>{
-      try{
-        if(!id){
-          const res=await post('/stop-latest',{}); // fallback
-          clearInterval(timer); setRun(false);
-          statusEl.textContent='Stopped (latest). '+(res.duration?res.duration.toFixed(2):'')+' min';
-          return;
-        }
-        const res=await post('/stop',{id});
-        clearInterval(timer); setRun(false);
-        statusEl.textContent='Stopped. '+(res.duration?res.duration.toFixed(2):'')+' min';
-      }catch(e){
-        // fallback on any failure
-        try{
-          const res=await post('/stop-latest',{});
-          clearInterval(timer); setRun(false);
-          statusEl.textContent='Stopped (latest). '+(res.duration?res.duration.toFixed(2):'')+' min';
-        }catch(e2){
-          statusEl.textContent='Stop error';
-          console.error(e2);
-        }
-      }
-    };
-  </script>
+stopBtn.onclick=async()=>{
+  try{
+    statusEl.textContent='Stopping…';
+    const res=await post('/stop',{});
+    clearInterval(timer); setRun(false);
+    statusEl.textContent='Stopped. '+(res.duration?res.duration.toFixed(2):'')+' min';
+  }catch(e){
+    statusEl.textContent='Stop error';
+    console.error(e);
+  }
+};
+</script>
 </body>
 </html>
