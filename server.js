@@ -4,75 +4,108 @@ const { MongoClient, ObjectId } = require("mongodb");
 require("dotenv").config();
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "256kb" }));
 
-// 1) Serve /public statics
+// serve UI
 app.use(express.static(path.join(__dirname, "public")));
-
-// 2) Explicit root route to index.html (fixes "Cannot GET /")
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// --- Mongo setup ---
+// env
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB || "studytimer";
 const COLL_NAME = process.env.MONGO_COLLECTION || "sessions";
 const PORT = process.env.PORT || 3000;
 
 if (!MONGO_URI) {
-  console.error("Missing MONGO_URI"); process.exit(1);
+  console.error("Missing MONGO_URI");
+  process.exit(1);
 }
 
 let sessions;
-async function initMongo() {
-  try {
-    const client = new MongoClient(MONGO_URI);
-    await client.connect();
-    const db = client.db(DB_NAME);
-    sessions = db.collection(COLL_NAME);
-    await sessions.createIndex({ startedAt: -1 }).catch(() => {});
-    console.log("Connected to MongoDB", DB_NAME, COLL_NAME);
-  } catch (e) {
-    console.error("Mongo connect error:", e);
-    process.exit(1);
-  }
-}
-initMongo();
 
-// Health
-app.get("/health", (_req, res) => res.json({ ok: true }));
-
-// Start
-app.post("/start", async (req, res) => {
-  const subject = (req.body?.subject || "").slice(0, 200);
-  const doc = { subject, startedAt: new Date(), endedAt: null };
-  const r = await sessions.insertOne(doc);
-  res.json({ ok: true, id: r.insertedId, startedAt: doc.startedAt });
+// connect Mongo
+(async () => {
+  const client = new MongoClient(MONGO_URI);
+  await client.connect();
+  const db = client.db(DB_NAME);
+  sessions = db.collection(COLL_NAME);
+  await sessions.createIndex({ startedAt: -1 }).catch(() => {});
+  console.log("Connected to MongoDB", DB_NAME, COLL_NAME);
+})().catch((e) => {
+  console.error("Mongo connect error:", e);
+  process.exit(1);
 });
 
-// Stop
+// health
+app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// start
+app.post("/start", async (req, res) => {
+  try {
+    const subject = (req.body?.subject || "").slice(0, 200);
+    const doc = { subject, startedAt: new Date(), endedAt: null };
+    const r = await sessions.insertOne(doc);
+    const id = r.insertedId.toHexString();            // <- force string id
+    console.log("START ok", { id, subject });
+    res.json({ ok: true, id, startedAt: doc.startedAt });
+  } catch (e) {
+    console.error("START error", e);
+    res.status(500).json({ ok: false, error: "START_FAILED" });
+  }
+});
+
+// stop
 app.post("/stop", async (req, res) => {
-  let raw = req.body?.id;
-  if (!raw) return res.status(400).json({ ok: false, error: "Missing id" });
+  try {
+    let raw = req.body?.id;
+    if (!raw) {
+      console.warn("STOP missing id", req.body);
+      return res.status(400).json({ ok: false, error: "MISSING_ID" });
+    }
 
-  // Accept "abc...", {"$oid":"abc..."}, or anything with toString()
-  const idStr =
-    typeof raw === "string" ? raw :
-    (raw && typeof raw === "object" && (raw.$oid || raw.oid || raw.id)) ||
-    String(raw);
+    // normalize id: string or {$oid: "..."} or any object with an id-ish field
+    const idStr =
+      typeof raw === "string"
+        ? raw
+        : (raw && (raw.$oid || raw.oid || raw.id)) || String(raw);
 
-  const endedAt = new Date();
-  const r = await sessions.findOneAndUpdate(
-    { _id: new (require("mongodb").ObjectId)(idStr) },
-    { $set: { endedAt } },
-    { returnDocument: "after" }
-  );
-  if (!r.value) return res.status(404).json({ ok: false, error: "Not found" });
+    const endedAt = new Date();
+    const r = await sessions.findOneAndUpdate(
+      { _id: new ObjectId(idStr) },
+      { $set: { endedAt } },
+      { returnDocument: "after" }
+    );
 
-  const doc = r.value;
-  const duration = (doc.startedAt && doc.endedAt) ? (doc.endedAt - doc.startedAt) / 60000 : null;
-  res.json({ ok: true, endedAt, duration });
+    if (!r?.value) {
+      console.warn("STOP not found", { idStr });
+      return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+    }
+
+    const doc = r.value;
+    const duration =
+      doc.startedAt && doc.endedAt
+        ? (doc.endedAt - doc.startedAt) / 60000
+        : null;
+
+    console.log("STOP ok", { idStr, duration });
+    res.json({ ok: true, id: idStr, endedAt, duration });
+  } catch (e) {
+    console.error("STOP error", e);
+    res.status(500).json({ ok: false, error: "STOP_FAILED" });
+  }
+});
+
+// list
+app.get("/sessions", async (_req, res) => {
+  try {
+    const list = await sessions.find().sort({ startedAt: -1 }).limit(500).toArray();
+    res.json(list);
+  } catch (e) {
+    console.error("SESSIONS error", e);
+    res.status(500).json({ ok: false, error: "LIST_FAILED" });
+  }
 });
 
 app.listen(PORT, () => console.log("Timer running on", PORT));

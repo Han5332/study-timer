@@ -1,44 +1,92 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"/><title>Study Timer</title></head>
+<head>
+  <meta charset="utf-8"/>
+  <title>Study Timer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; max-width: 560px; margin: 24px auto; }
+    .row { display:flex; gap:8px; margin:8px 0; }
+    input { flex:1; padding:8px; }
+    button { padding:10px 16px; border:1px solid #aaa; border-radius:10px; cursor:pointer; }
+    .muted { color:#666; font-size: 12px; }
+    .time { font-size: 28px; font-variant-numeric: tabular-nums; margin: 12px 0; }
+  </style>
+</head>
 <body>
   <h2>Study Timer</h2>
-  <input id="subject" placeholder="Subject">
-  <button id="start">Start</button>
-  <button id="stop" disabled>Stop</button>
-  <div id="elapsed">00:00:00</div>
-  <div id="status"></div>
+  <div class="row">
+    <input id="subject" placeholder="Subject (optional)" />
+  </div>
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <div class="time" id="elapsed">00:00:00</div>
+  <div id="status">Idle</div>
+  <div class="muted">Session ID: <span id="sid">—</span></div>
 
 <script>
-const startBtn=document.getElementById('start');
-const stopBtn=document.getElementById('stop');
-const subj=document.getElementById('subject');
-const status=document.getElementById('status');
-const elapsed=document.getElementById('elapsed');
-let id=null,t0=null,timer=null;
+const startBtn = document.getElementById('start');
+const stopBtn  = document.getElementById('stop');
+const subj     = document.getElementById('subject');
+const statusEl = document.getElementById('status');
+const elapsed  = document.getElementById('elapsed');
+const sidEl    = document.getElementById('sid');
+
+let id=null, t0=null, timer=null;
 
 function fmt(ms){
-  const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
-  return [h,m,sec].map(x=>String(x).padStart(2,'0')).join(':');
+  const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+  const pad=n=>String(n).padStart(2,'0'); return `${pad(h)}:${pad(m)}:${pad(sec)}`;
 }
 function setRun(r){ startBtn.disabled=r; stopBtn.disabled=!r; }
-async function post(p,b){
-  const r=await fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-  if(!r.ok) throw new Error(await r.text());
+async function post(path, body){
+  const r = await fetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body||{}) });
+  if(!r.ok){
+    const txt = await r.text().catch(()=>String(r.status));
+    throw new Error(`HTTP ${r.status} ${txt}`);
+  }
   return r.json();
 }
 
-startBtn.onclick=async()=>{
-  const res=await post('/start',{subject:subj.value});
-  id=res.id; t0=Date.now();
-  timer=setInterval(()=>elapsed.textContent=fmt(Date.now()-t0),250);
-  setRun(true); status.textContent="Running...";
+startBtn.onclick = async () => {
+  try {
+    statusEl.textContent = "Starting…";
+    const res = await post('/start', { subject: subj.value });
+
+    // normalize id (string or {$oid})
+    const newId = typeof res.id === 'string' ? res.id
+                 : (res.id && (res.id.$oid || res.id.oid || res.id.id)) || '';
+    if(!newId){ statusEl.textContent = "Start error: invalid id"; return; }
+
+    id = newId;
+    sidEl.textContent = id;
+    t0 = Date.now();
+    timer = setInterval(()=> elapsed.textContent = fmt(Date.now()-t0), 250);
+    setRun(true);
+    statusEl.textContent = "Running";
+    console.log("START ok", res);
+  } catch (e) {
+    console.error("START error", e);
+    statusEl.textContent = "Start error";
+  }
 };
-stopBtn.onclick=async()=>{
-  if(!id) return;
-  const res=await post('/stop',{id});
-  clearInterval(timer); setRun(false);
-  status.textContent="Stopped. Duration: "+(res.duration?res.duration.toFixed(2):"N/A")+" min";
+
+stopBtn.onclick = async () => {
+  try {
+    if(!id){ statusEl.textContent = "No active session"; return; }
+    statusEl.textContent = "Stopping…";
+    const res = await post('/stop', { id });
+    clearInterval(timer);
+    setRun(false);
+    const dur = res.duration != null ? res.duration.toFixed(2) : "N/A";
+    statusEl.textContent = "Stopped. Duration: " + dur + " min";
+    console.log("STOP ok", res);
+  } catch (e) {
+    console.error("STOP error", e);
+    statusEl.textContent = "Stop error";
+  }
 };
 </script>
 </body>
