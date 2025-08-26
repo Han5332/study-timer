@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"/><title>Study Timer</title></head>
+<body>
+<h2>Study Timer</h2>
+<input id="subject" placeholder="Subject">
+<button id="start">Start</button>
+<button id="stop" disabled>Stop</button>
+<div id="elapsed">00:00:00</div>
+<div id="status"></div>
+<script>
+const startBtn=document.getElementById('start');
+const stopBtn=document.getElementById('stop');
+const subj=document.getElementById('subject');
+const status=document.getElementById('status');
+const elapsed=document.getElementById('elapsed');
+let id=null,t0=null,timer=null;
+function fmt(ms){const s=Math.floor(ms/1000);
+  const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);
+  const sec=s%60;return [h,m,sec].map(x=>String(x).padStart(2,'0')).join(':');}
+function setRun(r){startBtn.disabled=r;stopBtn.disabled=!r;}
+async function post(p,b){const r=await fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+  return r.json();}
+startBtn.onclick=async()=>{const res=await post('/start',{subject:subj.value});
+  id=res.id;t0=Date.now();timer=setInterval(()=>elapsed.textContent=fmt(Date.now()-t0),250);
+  setRun(true);status.textContent="Running...";};
+stopBtn.onclick=async()=>{if(!id)return;const res=await post('/stop',{id});
+  clearInterval(timer);setRun(false);
+  status.textContent="Stopped. Duration: "+(res.duration?res.duration.toFixed(2):"N/A")+" min";};
+</script>
+</body></html>
