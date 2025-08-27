@@ -166,6 +166,42 @@ async function mapNotionProps() {
   };
 }
 
+let _cachedWalletPageId = null;
+
+async function resolveWalletPageId() {
+  if (_cachedWalletPageId) return _cachedWalletPageId;
+
+  const byEnv = (process.env.NOTION_WALLET_PAGE_ID || "").trim();
+  if (byEnv) {
+    _cachedWalletPageId = byEnv;
+    return _cachedWalletPageId;
+  }
+
+  if (!notion) return null;
+
+  const wantedTitle = (process.env.NOTION_WALLET_PAGE_TITLE || "My Bank").trim().toLowerCase();
+
+  // Search across workspace for a page titled "My Bank"
+  const search = await notion.search({
+    query: wantedTitle,
+    filter: { property: "object", value: "page" },
+    sort: { direction: "descending", timestamp: "last_edited_time" }
+  });
+
+  for (const p of search.results || []) {
+    if (p.object !== "page" || !p.properties) continue;
+    const titleKey = Object.entries(p.properties).find(([_, v]) => v.type === "title")?.[0];
+    const txt = titleKey ? (p.properties[titleKey].title?.[0]?.plain_text || "").trim().toLowerCase() : "";
+    if (txt === wantedTitle) {
+      _cachedWalletPageId = p.id;
+      return _cachedWalletPageId;
+    }
+  }
+
+  return null;
+}
+
+
 async function pushToNotion({ subject, startedAt, endedAt, minutes }) {
   if (!notion) return { skipped: true, reason: "notion-not-configured" };
 
