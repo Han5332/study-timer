@@ -124,6 +124,32 @@ async function mapNotionProps() {
     entries.find(([k, v]) => v.type === "rich_text" && /subject/i.test(k))?.[0] ||
     entries.find(([k, v]) => v.type === "rich_text")?.[0] ||
     null;
+  
+// Wallet relation (preferred)
+  const forcedWalletRel = process.env.NOTION_WALLET_RELATION_PROP || "";
+  let walletRelationProp = null;
+  if (forcedWalletRel && props[forcedWalletRel]?.type === "relation") {
+    walletRelationProp = forcedWalletRel;
+  } else {
+    walletRelationProp = entries.find(([k, v]) => v.type === "relation" && /wallet/i.test(k))?.[0] || null;
+  }
+
+  // Wallet tag (select / multi_select) fallback
+  const forcedWalletSel = process.env.NOTION_WALLET_SELECT_PROP || "";
+  let walletSelectProp = null;
+  let walletSelectType = null;
+  const isSel = (v) => v.type === "select" || v.type === "multi_select";
+
+  if (forcedWalletSel && props[forcedWalletSel] && isSel(props[forcedWalletSel])) {
+    walletSelectProp = forcedWalletSel;
+    walletSelectType = props[forcedWalletSel].type;
+  } else {
+    const found = entries.find(([k, v]) => isSel(v) && (/wallet|tag/i.test(k)));
+    if (found) {
+      walletSelectProp = found[0];
+      walletSelectType = found[1].type; // "select" or "multi_select"
+    }
+  }
 
   return {
     title,
@@ -133,6 +159,9 @@ async function mapNotionProps() {
     minutesProp,
     hoursProp,
     subjectProp,
+    walletRelationProp,
+    walletSelectProp, 
+    walletSelectType,
     all: Object.keys(props),
   };
 }
